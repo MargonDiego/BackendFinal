@@ -1,15 +1,20 @@
 const { DataSource } = require('typeorm');
+const path = require('path');
 const User = require('../entities/User');
 const Student = require('../entities/Student');
 const Intervention = require('../entities/Intervention');
 const InterventionComment = require('../entities/InterventionComment');
 const Audit = require('../entities/Audit');
 
+const dbPath = process.env.NODE_ENV === 'production'
+    ? path.join(process.cwd(), 'database.sqlite')
+    : path.join(__dirname, '..', 'database.sqlite');
+
 const AppDataSource = new DataSource({
     type: "sqlite",
-    database: "database.sqlite",
-    synchronize: true,
-    logging: true,
+    database: dbPath,
+    synchronize: process.env.NODE_ENV !== 'production', // false en producción
+    logging: process.env.NODE_ENV !== 'production',
     entities: [User, Student, Intervention, InterventionComment, Audit],
 });
 
