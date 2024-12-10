@@ -2,6 +2,7 @@ const BaseController = require('./base.controller');
 const { AppDataSource } = require('../config/database');
 
 const CommentRepository = AppDataSource.getRepository('InterventionComment');
+const UserRepository = AppDataSource.getRepository('User');
 const AuditRepository = AppDataSource.getRepository('Audit');
 
 class CommentController extends BaseController {
@@ -22,7 +23,7 @@ class CommentController extends BaseController {
             // Obtener todos los atributos del comentario
             const [comments, total] = await CommentRepository.findAndCount({
                 where: whereClause,
-                relations: req.query.relations ? req.query.relations.split(',') : ['intervention', 'user'],
+                relations: ['intervention', 'user'],
                 order: { createdAt: 'DESC' },
                 skip,
                 take: limit,
@@ -31,8 +32,23 @@ class CommentController extends BaseController {
                 ],
             });
 
+            // Asegurarse de que los datos relacionados estén completos
+            const populatedComments = comments.map(comment => ({
+                ...comment,
+                user: {
+                    id: comment.user?.id,
+                    firstName: comment.user?.firstName,
+                    lastName: comment.user?.lastName,
+                },
+                intervention: comment.intervention ? {
+                    id: comment.intervention.id,
+                    title: comment.intervention.title,
+                    status: comment.intervention.status,
+                } : null
+            }));
+
             return res.json({
-                data: comments,
+                data: populatedComments,
                 total,
                 page: parseInt(page, 10),
                 limit: parseInt(limit, 10),
@@ -63,21 +79,42 @@ class CommentController extends BaseController {
 
     static async create(req, res) {
         try {
-            const newComment = CommentRepository.create(req.body);
+            // Usar el usuario del token JWT
+            const user = await UserRepository.findOne({
+                where: { id: req.user.id }
+            });
+
+            if (!user) {
+                return res.status(400).json({ message: 'Usuario no encontrado' });
+            }
+
+            // Crear el comentario con la relación al usuario del token
+            const newComment = CommentRepository.create({
+                ...req.body,
+                user: user
+            });
+
             const result = await CommentRepository.save(newComment);
 
+            // Cargar el comentario con todas sus relaciones
+            const savedComment = await CommentRepository.findOne({
+                where: { id: result.id },
+                relations: ['intervention', 'user']
+            });
+
             await AuditRepository.save({
-                userId: req.user?.id,
+                userId: req.user.id,
                 entityName: 'InterventionComment',
                 entityId: result.id,
                 action: 'CREAR',
                 oldValues: null,
-                newValues: result,
+                newValues: savedComment,
                 module: 'COMENTARIOS_INTERVENCIONES',
             });
 
-            return res.status(201).json(result);
+            return res.status(201).json(savedComment);
         } catch (error) {
+            console.error('Error creating comment:', error);
             return res.status(500).json({ message: 'Error creating intervention comment', error: error.message });
         }
     }
@@ -86,28 +123,47 @@ class CommentController extends BaseController {
         try {
             const { id } = req.params;
 
-            const comment = await CommentRepository.findOne({ where: { id: parseInt(id, 10) } });
+            // Buscar el comentario con sus relaciones
+            const comment = await CommentRepository.findOne({
+                where: { id: parseInt(id, 10) },
+                relations: ['user', 'intervention']
+            });
+
             if (!comment) {
                 return res.status(404).json({ message: 'Intervention comment not found' });
             }
 
+            // Verificar que el usuario que actualiza sea el autor
+            if (comment.user.id !== req.user.id) {
+                return res.status(403).json({ message: 'No autorizado para editar este comentario' });
+            }
+
             const oldValues = { ...comment };
+
+            // Mantener la relación con el usuario original
             const updatedComment = await CommentRepository.save({
                 ...comment,
                 ...req.body,
+                user: comment.user // Mantener el usuario original
             });
 
             await AuditRepository.save({
-                userId: req.user?.id,
+                userId: req.user.id,
                 entityName: 'InterventionComment',
                 entityId: updatedComment.id,
-                action: 'MODIFICAR',
+                action: 'ACTUALIZAR',
                 oldValues,
                 newValues: updatedComment,
                 module: 'COMENTARIOS_INTERVENCIONES',
             });
 
-            return res.json(updatedComment);
+            // Devolver el comentario actualizado con sus relaciones
+            const refreshedComment = await CommentRepository.findOne({
+                where: { id: updatedComment.id },
+                relations: ['intervention', 'user']
+            });
+
+            return res.json(refreshedComment);
         } catch (error) {
             return res.status(500).json({ message: 'Error updating intervention comment', error: error.message });
         }
@@ -117,25 +173,34 @@ class CommentController extends BaseController {
         try {
             const { id } = req.params;
 
-            const comment = await CommentRepository.findOne({ where: { id: parseInt(id, 10) } });
+            // Buscar el comentario con sus relaciones
+            const comment = await CommentRepository.findOne({
+                where: { id: parseInt(id, 10) },
+                relations: ['user']
+            });
+
             if (!comment) {
                 return res.status(404).json({ message: 'Intervention comment not found' });
             }
 
-            const oldValues = { ...comment };
-            await CommentRepository.delete(id);
+            // Verificar que el usuario que elimina sea el autor
+            if (comment.user.id !== req.user.id) {
+                return res.status(403).json({ message: 'No autorizado para eliminar este comentario' });
+            }
+
+            await CommentRepository.remove(comment);
 
             await AuditRepository.save({
-                userId: req.user?.id,
+                userId: req.user.id,
                 entityName: 'InterventionComment',
-                entityId: comment.id,
+                entityId: id,
                 action: 'ELIMINAR',
-                oldValues,
+                oldValues: comment,
                 newValues: null,
                 module: 'COMENTARIOS_INTERVENCIONES',
             });
 
-            return res.json({ message: 'Intervention comment deleted successfully' });
+            return res.status(204).send();
         } catch (error) {
             return res.status(500).json({ message: 'Error deleting intervention comment', error: error.message });
         }

@@ -12,7 +12,9 @@ class AuthController {
 
             const user = await UserRepository.findOne({
                 where: { email },
-                select: ['id', 'email', 'password', 'role', 'firstName', 'lastName']
+                select: ['id', 'email', 'password', 'role', 'firstName', 'lastName','staffType',
+                    'department'
+                ],
             });
 
             if (!user || !await bcrypt.compare(password, user.password)) {
@@ -48,9 +50,11 @@ class AuthController {
                 user: {
                     id: user.id,
                     email: user.email,
-                    role: user.role,
                     firstName: user.firstName,
                     lastName: user.lastName,
+                    role: user.role,
+                    staffType: user.staffType,
+                    department: user.department
                 }
             });
         } catch (error) {

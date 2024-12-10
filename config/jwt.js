@@ -9,7 +9,11 @@ function generateToken(user) {
         {
             id: user.id,
             email: user.email,
-            role: user.role
+            role: user.role,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            staffType: user.staffType,
+            department: user.department
         },
         JWT_SECRET,
         { expiresIn: JWT_EXPIRY }
